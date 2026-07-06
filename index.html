@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StructTrace — Watch your structures come alive</title>
+<style>
+:root{--bg:#0b0d10;--panel:#14171c;--line:#262b33;--txt:#e7ebf0;--mut:#8b95a5;--acc:#4da3ff;--ok:#3ad29f;--warn:#ffb454;--bad:#ff6b6b}
+*{box-sizing:border-box;font-family:ui-sans-serif,system-ui,Segoe UI,Roboto,Arial}
+body{margin:0;background:var(--bg);color:var(--txt)}
+header{text-align:center;padding:30px 16px 6px}
+h1{font-size:40px;margin:0;font-weight:800}
+.sub{color:var(--mut);max-width:660px;margin:10px auto 0}
+.modes{display:flex;gap:8px;justify-content:center;margin:16px auto}
+.modes button{background:var(--panel);border:1px solid var(--line);color:var(--txt);padding:8px 16px;border-radius:8px;cursor:pointer}
+.modes button.active{background:var(--acc);color:#08121f;border-color:var(--acc);font-weight:700}
+.wrap{display:grid;grid-template-columns:330px 1fr 350px;gap:14px;padding:14px;max-width:1400px;margin:auto}
+@media(max-width:1100px){.wrap{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+.card h3{margin:0 0 10px;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+label{display:block;font-size:12px;color:var(--mut);margin:8px 0 3px}
+input,select,textarea{width:100%;background:#0e1116;border:1px solid var(--line);color:var(--txt);border-radius:7px;padding:8px}
+.row{display:flex;gap:8px}
+.row>*{flex:1}
+button.primary{width:100%;margin-top:12px;background:var(--acc);color:#08121f;border:none;padding:10px;border-radius:8px;font-weight:700;cursor:pointer}
+svg{width:100%;background:#0e1116;border-radius:8px;border:1px solid var(--line)}
+.step{display:flex;gap:8px;align-items:center;margin-top:10px}
+.step button{background:var(--panel);border:1px solid var(--line);color:var(--txt);border-radius:7px;padding:6px 12px;cursor:pointer}
+.val{font-family:ui-monospace,Consolas,monospace;font-size:13px}
+.val b{color:var(--acc)}
+.stepbox{background:#0e1116;border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:10px;min-height:66px}
+.chat{display:flex;flex-direction:column;height:400px}
+.log{flex:1;overflow:auto;font-size:13px;padding-right:4px}
+.msg{margin:8px 0;padding:8px 10px;border-radius:8px;white-space:pre-wrap}
+.me{background:#10202e}
+.ai{background:#161b22}
+.chat .row{margin-top:8px}
+.pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px}
+.pass{background:rgba(58,210,159,.15);color:var(--ok)}
+.fail{background:rgba(255,107,107,.15);color:var(--bad)}
+.quiz button{display:block;width:100%;text-align:left;margin-top:6px;background:#0e1116;border:1px solid var(--line);color:var(--txt);padding:8px;border-radius:7px;cursor:pointer}
+small{color:var(--mut)}
+</style>
+</head>
+<body>
+<header>
+<h1>StructTrace</h1>
+<div class="sub">Master structural analysis by seeing it work. Define a member and load case, then trace every reaction, shear, moment and deflection — live from your model.</div>
+<div class="modes">
+<button data-mode="learn" class="active">Learn the concept</button>
+<button data-mode="predict">Predict each step</button>
+<button data-mode="exam">Timed mock (FE/PE)</button>
+</div>
+<div style="max-width:660px;margin:0 auto"><input id="key" placeholder="OpenAI-compatible API key (optional — enables AI agent chat, stored locally only)"></div>
+</header>
+<div class="wrap">
+<div class="card">
+<h3>Member &amp; Loads</h3>
+<label>Support type</label>
+<select id="support"><option value="ss">Simply supported</option><option value="cant">Cantilever (fixed left)</option></select>
+<label>Span L (m)</label><input id="L" type="number" value="6">
+<div class="row"><div><label>UDL w (kN/m)</label><input id="w" type="number" value="20"></div><div><label>Point P (kN)</label><input id="P" type="number" value="0"></div></div>
+<label>Point load position a (m)</label><input id="a" type="number" value="3">
+<h3 style="margin-top:16px">Section (steel LRFD)</h3>
+<div class="row"><div><label>E (GPa)</label><input id="E" type="number" value="200"></div><div><label>I (1e6 mm4)</label><input id="I" type="number" value="84.9"></div></div>
+<div class="row"><div><label>Zx (1e3 mm3)</label><input id="Zx" type="number" value="481"></div><div><label>Fy (MPa)</label><input id="Fy" type="number" value="345"></div></div>
+<button class="primary" onclick="run()">Trace analysis</button>
+</div>
+<div class="card">
+<h3>Visualization</h3>
+<svg id="beam" viewBox="0 0 560 90"></svg>
+<svg id="shear" viewBox="0 0 560 150" style="margin-top:8px"></svg>
+<svg id="moment" viewBox="0 0 560 150" style="margin-top:8px"></svg>
+<div class="step"><button onclick="stepPrev()">Prev</button><span id="stepno" class="val">Step 0 / 0</span><button onclick="stepNext()">Next</button></div>
+<div class="stepbox"><div id="stepText" class="val">Define a member and click <b>Trace analysis</b>.</div><div id="quiz" class="quiz"></div></div>
+</div>
+<div class="card">
+<h3>StructTrace Agent</h3>
+<div class="chat"><div id="log" class="log"><div class="msg ai">Hi, I am the StructTrace agent. Run an analysis, then ask me to explain a step, check code compliance, or quiz you. Try: "Explain the max moment" or "Is this beam OK per AISC?"</div></div><div class="row"><input id="q" placeholder="Ask the agent..."><button onclick="ask()" style="flex:0 0 70px">Send</button></div></div>
+<div id="results" style="margin-top:12px" class="val"></div>
+</div>
+</div>
+<script>
+var MODE="learn";
+document.querySelectorAll(".modes button").forEach(function(b){b.onclick=function(){document.querySelectorAll(".modes button").forEach(function(x){x.classList.remove("active")});b.classList.add("active");MODE=b.dataset.mode;renderStep();};});
+document.getElementById("key").value=localStorage.getItem("st_key")||"";
+document.getElementById("key").oninput=function(e){localStorage.setItem("st_key",e.target.value);};
+function num(id){return parseFloat(document.getElementById(id).value)||0;}
+var model={},steps=[],si=0;
+function run(){
+var s=document.getElementById("support").value,L=num("L"),w=num("w"),P=num("P"),a=num("a");
+var E=num("E")*1e9,I=num("I")*1e-6,Zx=num("Zx")*1e-6,Fy=num("Fy")*1e6;
+var RA,RB,Mmax,Vmax,defl,xM;
+if(s==="ss"){RB=(w*L*L/2+P*a)/L;RA=w*L+P-RB;xM=w?RA/w:a;Mmax=w?RA*xM-w*xM*xM/2:RA*a;if(P&&w){Mmax=RA*a-w*a*a/2;}Vmax=Math.max(RA,RB);defl=(5*w*Math.pow(L,4)/(384*E*I))+(P*Math.pow(L,3)/(48*E*I));}
+else{RA=w*L+P;RB=0;xM=0;Mmax=w*L*L/2+P*a;Vmax=w*L+P;defl=(w*Math.pow(L,4)/(8*E*I))+(P*a*a*(3*L-a)/(6*E*I));}
+var Mn=Fy*Zx,ratio=(Mmax*1000)/(0.9*Mn*1000),pass=ratio<=1,allowD=L/250,defPass=defl<=allowD;
+model={s:s,L:L,w:w,P:P,a:a,RA:RA,RB:RB,Mmax:Mmax,Vmax:Vmax,defl:defl,xM:xM,Mn:Mn,ratio:ratio,pass:pass,allowD:allowD,defPass:defPass};
+steps=[
+{t:"Step 1 - Equilibrium. Apply sum of vertical forces = 0 and sum of moments = 0 to find support reactions.",v:"R_A = <b>"+RA.toFixed(2)+" kN</b>"+(s==="ss"?", R_B = <b>"+RB.toFixed(2)+" kN</b>":" (fixed end)"),q:{ask:"For a simply supported beam under UDL w over span L, R_A equals:",opts:["wL","wL/2","wL^2/8"],ans:1}},
+{t:"Step 2 - Shear force. V starts at R_A and decreases under distributed load; it crosses zero where the moment peaks.",v:"V_max = <b>"+Vmax.toFixed(2)+" kN</b>, zero-shear at x = <b>"+xM.toFixed(2)+" m</b>",q:{ask:"Maximum bending moment occurs where shear:",opts:["is maximum","crosses zero","equals the reaction"],ans:1}},
+{t:"Step 3 - Bending moment. Integrate shear to get the moment diagram; the peak is the design moment M_u.",v:"M_max = <b>"+Mmax.toFixed(2)+" kNm</b>",q:{ask:"For a simply supported beam with UDL, M_max equals:",opts:["wL^2/8","wL^2/2","wL/4"],ans:0}},
+{t:"Step 4 - Serviceability. Compute max deflection and compare to the L/250 limit.",v:"delta_max = <b>"+(defl*1000).toFixed(2)+" mm</b>, limit L/250 = <b>"+(allowD*1000).toFixed(2)+" mm</b> "+(defPass?"<span class='pill pass'>OK</span>":"<span class='pill fail'>EXCEEDS</span>"),q:{ask:"A deflection limit of L/250 is a check for:",opts:["strength","serviceability","stability"],ans:1}},
+{t:"Step 5 - Strength check (LRFD). Compare M_u to design flexural strength phi*Mn (phi=0.90).",v:"phi*Mn = <b>"+(0.9*Mn/1000).toFixed(1)+" kNm</b>, demand/capacity = <b>"+ratio.toFixed(2)+"</b> "+(pass?"<span class='pill pass'>PASS</span>":"<span class='pill fail'>OVERSTRESS</span>"),q:{ask:"In LRFD flexure, the resistance factor phi for yielding is:",opts:["0.75","0.90","1.00"],ans:1}}
+];
+si=0;draw();renderStep();
+document.getElementById("results").innerHTML="R_A="+RA.toFixed(2)+" kN | V_max="+Vmax.toFixed(2)+" kN | M_max="+Mmax.toFixed(2)+" kNm | delta="+(defl*1000).toFixed(2)+" mm | D/C="+ratio.toFixed(2)+" "+(pass?"PASS":"FAIL");
+}
+function draw(){
+var L=model.L,x0=40,x1=520,y=45,sc=(x1-x0)/L;
+var beam="<line x1='"+x0+"' y1='"+y+"' x2='"+x1+"' y2='"+y+"' stroke='#4da3ff' stroke-width='5'/>";
+if(model.s==="ss"){beam+="<polygon points='"+x0+","+y+" "+(x0-9)+","+(y+16)+" "+(x0+9)+","+(y+16)+"' fill='#8b95a5'/>";beam+="<polygon points='"+x1+","+y+" "+(x1-9)+","+(y+16)+" "+(x1+9)+","+(y+16)+"' fill='#8b95a5'/>";}
+else{beam+="<rect x='"+(x0-8)+"' y='"+(y-18)+"' width='8' height='36' fill='#8b95a5'/>";}
+if(model.w){for(var i=0;i<=10;i++){var xx=x0+i*(x1-x0)/10;beam+="<line x1='"+xx+"' y1='18' x2='"+xx+"' y2='"+(y-4)+"' stroke='#ffb454' stroke-width='1.5'/>";}beam+="<line x1='"+x0+"' y1='18' x2='"+x1+"' y2='18' stroke='#ffb454' stroke-width='2'/>";beam+="<text x='"+((x0+x1)/2)+"' y='14' fill='#ffb454' font-size='11' text-anchor='middle'>w="+model.w+" kN/m</text>";}
+if(model.P){var px=x0+model.a*sc;beam+="<line x1='"+px+"' y1='8' x2='"+px+"' y2='"+(y-4)+"' stroke='#ff6b6b' stroke-width='2.5'/><polygon points='"+px+","+(y-4)+" "+(px-5)+","+(y-14)+" "+(px+5)+","+(y-14)+"' fill='#ff6b6b'/><text x='"+px+"' y='6' fill='#ff6b6b' font-size='11' text-anchor='middle'>P="+model.P+"</text>";}
+document.getElementById("beam").innerHTML=beam;
+var N=60,sh="",mm="",vmax=0,mmax=0,sv=[],mv=[];
+for(var k=0;k<=N;k++){var x=L*k/N,V,M;if(model.s==="ss"){V=model.RA-model.w*x-(model.P&&x>model.a?model.P:0);M=model.RA*x-model.w*x*x/2-(model.P&&x>model.a?model.P*(x-model.a):0);}else{V=model.RA-model.w*x-(model.P&&x<model.a?0:0)-(model.P&&x>=model.a?0:0);V=(model.w*(L-x))+(model.P&&x<model.a?model.P:0);M=-(model.w*(L-x)*(L-x)/2)-(model.P&&x<model.a?model.P*(model.a-x):0);}sv.push(V);mv.push(M);vmax=Math.max(vmax,Math.abs(V));mmax=Math.max(mmax,Math.abs(M));}
+function poly(vals,mx,color,fill){var p="40,75 ";for(var k=0;k<=N;k++){var x=40+k*(480)/N;var yv=75-(vals[k]/(mx||1))*60;p+=x.toFixed(1)+","+yv.toFixed(1)+" ";}p+="520,75";return "<polyline points='"+p+"' fill='"+fill+"' stroke='"+color+"' stroke-width='2'/><line x1='40' y1='75' x2='520' y2='75' stroke='#8b95a5' stroke-width='1'/>";}
+document.getElementById("shear").innerHTML=poly(sv,vmax,"#3ad29f","rgba(58,210,159,.15)")+"<text x='46' y='16' fill='#3ad29f' font-size='12'>Shear (kN)</text>";
+document.getElementById("moment").innerHTML=poly(mv.map(function(m){return -m;}),mmax,"#4da3ff","rgba(77,163,255,.15)")+"<text x='46' y='16' fill='#4da3ff' font-size='12'>Moment (kNm)</text>";
+}
+function stepNext(){if(si<steps.length-1){si++;renderStep();}}
+function stepPrev(){if(si>0){si--;renderStep();}}
+function renderStep(){
+if(!steps.length){return;}
+var s=steps[si];document.getElementById("stepno").textContent="Step "+(si+1)+" / "+steps.length;
+var q=document.getElementById("quiz");q.innerHTML="";
+if(MODE==="learn"){document.getElementById("stepText").innerHTML=s.t+"<br><br>"+s.v;}
+else if(MODE==="predict"){document.getElementById("stepText").innerHTML="<b>Predict:</b> "+s.q.ask;s.q.opts.forEach(function(o,i){var b=document.createElement("button");b.textContent=o;b.onclick=function(){document.getElementById("stepText").innerHTML=(i===s.q.ans?"<span class='pill pass'>Correct</span> ":"<span class='pill fail'>Not quite</span> ")+s.t+"<br><br>"+s.v;q.innerHTML="";};q.appendChild(b);});}
+else{document.getElementById("stepText").innerHTML="<b>Timed mock:</b> "+s.q.ask+" <small>(answer, then Next)</small>";s.q.opts.forEach(function(o,i){var b=document.createElement("button");b.textContent=o;b.onclick=function(){b.style.borderColor=(i===s.q.ans?"#3ad29f":"#ff6b6b");};q.appendChild(b);});}
+}
+function addMsg(cls,txt){var d=document.createElement("div");d.className="msg "+cls;d.textContent=txt;var log=document.getElementById("log");log.appendChild(d);log.scrollTop=log.scrollHeight;return d;}
+function localAnswer(qq){
+if(!model.L){return "Run an analysis first, then I can explain the results.";}
+return "Current model: L="+model.L+" m, w="+model.w+" kN/m, P="+model.P+" kN.\nReactions R_A="+model.RA.toFixed(2)+" kN, R_B="+model.RB.toFixed(2)+" kN.\nM_max="+model.Mmax.toFixed(2)+" kNm at x="+model.xM.toFixed(2)+" m; V_max="+model.Vmax.toFixed(2)+" kN.\nDeflection="+(model.defl*1000).toFixed(2)+" mm vs L/250="+(model.allowD*1000).toFixed(2)+" mm.\nLRFD flexure: phi*Mn="+(0.9*model.Mn/1000).toFixed(1)+" kNm, demand/capacity="+model.ratio.toFixed(2)+" -> "+(model.pass?"PASS":"OVERSTRESS")+". (Add an API key for full natural-language explanations.)";}
+function ask(){
+var qEl=document.getElementById("q"),qq=qEl.value.trim();if(!qq){return;}addMsg("me",qq);qEl.value="";
+var key=(document.getElementById("key").value||"").trim();
+if(!key){addMsg("ai",localAnswer(qq));return;}
+var think=addMsg("ai","...");
+var sys="You are StructTrace, an expert structural-engineering tutor. Explain beam analysis, load paths, shear/moment diagrams, deflection and AISC/ASCE code checks clearly and rigorously. Use the model context if provided. Be concise.";
+var ctx=model.L?("Model context: "+JSON.stringify(model)):"No analysis has been run yet.";
+fetch("https://api.openai.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key},body:JSON.stringify({model:"gpt-4o-mini",messages:[{role:"system",content:sys},{role:"system",content:ctx},{role:"user",content:qq}]})}).then(function(r){return r.json();}).then(function(j){think.textContent=(j.choices&&j.choices[0]&&j.choices[0].message.content)||("Error: "+JSON.stringify(j.error||j));}).catch(function(e){think.textContent="Network error: "+e.message+" Falling back to offline summary:\n\n"+localAnswer(qq);});
+}
+document.getElementById("q").addEventListener("keydown",function(e){if(e.key==="Enter"){ask();}});
+</script>
+</body>
+</html>
